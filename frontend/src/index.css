@@ -1,0 +1,39 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --primary: #166534;
+    --primary-light: #22a55a;
+    --primary-pale: #ecf8f0;
+    --cream: #fcfbf8;
+    --text-dark: #1a2e22;
+    --text-muted: #5b6b61;
+    --border: #e3e8e4;
+    --warning: #f59e0b;
+    --error: #ef4444;
+    --success: #22c55e;
+  }
+
+  body {
+    margin: 0;
+    font-family: system-ui, -apple-system, sans-serif;
+    background-color: var(--cream);
+    color: var(--text-dark);
+  }
+
+  #root {
+    min-height: 100vh;
+  }
+}
+
+@layer utilities {
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "model_name": "AgriAssist Yield Prediction Model",
+  "model_type": "RandomForestRegressor",
+  "training_date": "2026-10-02T14:24:00.843503",
+  "dataset_type": "synthetic",
+  "dataset_size": 3000,
+  "features": [
+    "crop",
+    "land_size_acres",
+    "planting_month",
+    "rainfall_mm",
+    "temperature_c"
+  ],
+  "num_estimators": 100,
+  "max_depth": 10,
+  "r2_score": 0.9322921447607687,
+  "mae": 35.41717825375833,
+  "test_size": 0.2,
+  "random_state": 42,
+  "crops_supported": [
+    "rice",
+    "wheat",
+    "cotton",
+    "tomato",
+    "sugarcane",
+    "soybean",
+    "onion",
+    "grape",
+    "maize",
+    "groundnut",
+    "chilli",
+    "potato",
+    "banana",
+    "mango",
+    "turmeric"
+  ],
+  "note": "This is a synthetic dataset for demonstration purposes. For production, use real agricultural data."
+}

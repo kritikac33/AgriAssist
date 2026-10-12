@@ -1,0 +1,27 @@
+{
+  "model_name": "AgriAssist Disease Detection Model",
+  "model_type": "MobileNetV2 Transfer Learning",
+  "training_date": "2026-10-02T09:31:31.554328",
+  "num_classes": 10,
+  "classes": [
+    "Tomato_healthy",
+    "Tomato_Late_blight",
+    "Tomato_Early_blight",
+    "Potato___healthy",
+    "Potato___Late_blight",
+    "Potato___Early_blight",
+    "Tomato_Leaf_Mold",
+    "Tomato_Septoria_leaf_spot",
+    "Pepper__bell___healthy",
+    "Pepper__bell___Bacterial_spot"
+  ],
+  "image_size": [
+    160,
+    160
+  ],
+  "max_images_per_class": 300,
+  "epochs_trained": 8,
+  "final_val_accuracy": 0.9154929518699646,
+  "final_val_loss": 0.2303438037633896,
+  "dataset_source": "Kaggle PlantVillage (emmarex/plantdisease)"
+}
