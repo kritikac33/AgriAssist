@@ -123,6 +123,7 @@ export interface SoilRecordCreate {
   phosphorus?: number | string | null;
   potassium?: number | string | null;
   organic_matter?: number | string | null;
+  moisture?: number | string | null;
   source?: string;
 }
 
@@ -133,6 +134,7 @@ export interface SoilRecordResponse {
   phosphorus?: string | null;
   potassium?: string | null;
   organic_matter?: string | null;
+  moisture?: string | null;
   source: string;
   id: number;
   test_date: string;
@@ -149,11 +151,22 @@ export interface SoilAnalysis {
   phosphorus_explanation: string;
   potassium_status: string;
   potassium_explanation: string;
+  organic_matter_status?: string;
+  organic_matter_explanation?: string;
+  moisture_status?: string;
+  moisture_explanation?: string;
 }
 
 // Irrigation Types
 export interface IrrigationScheduleCreate {
   farm_id: number;
+  crop_id?: number | null;
+  area_hectares?: number | string | null;
+  soil_type?: string | null;
+  crop_stage?: string | null;
+  soil_moisture_percent?: number | string | null;
+  rainfall_mm?: number | string | null;
+  temperature_c?: number | string | null;
   scheduled_date: string;
   duration_hours?: number | string | null;
   water_amount_liters?: number | string | null;
@@ -163,6 +176,14 @@ export interface IrrigationScheduleCreate {
 
 export interface IrrigationScheduleResponse {
   farm_id: number;
+  crop_id?: number | null;
+  area_hectares?: string | null;
+  soil_type?: string | null;
+  crop_stage?: string | null;
+  soil_moisture_percent?: string | null;
+  rainfall_mm?: string | null;
+  temperature_c?: string | null;
+  weather_source?: string | null;
   scheduled_date: string;
   duration_hours?: string | null;
   water_amount_liters?: string | null;
@@ -187,6 +208,14 @@ export interface YieldPredictionCreate {
   crop_id: number;
   land_size_acres: number | string;
   planting_date: string;
+  ph_level?: number | string | null;
+  nitrogen?: number | string | null;
+  phosphorus?: number | string | null;
+  potassium?: number | string | null;
+  soil_moisture_percent?: number | string | null;
+  rainfall_mm?: number | string | null;
+  irrigation_mm?: number | string | null;
+  temperature_c?: number | string | null;
 }
 
 export interface YieldPredictionResponse {
@@ -202,6 +231,8 @@ export interface YieldPredictionResponse {
   harvest_window_start?: string | null;
   harvest_window_end?: string | null;
   version: number;
+  input_snapshot?: Record<string, unknown> | null;
+  model_version?: string | null;
   created_at: string;
 }
 

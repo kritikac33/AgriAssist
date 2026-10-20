@@ -1,15 +1,15 @@
 """
 Marketplace router - listings and messaging (REQ-35 to REQ-38).
 """
-from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File
-from sqlalchemy.orm import Session
-from sqlalchemy import and_, desc
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Body
+from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import and_, desc, or_
 from typing import List, Optional
 from datetime import datetime
 from decimal import Decimal
 
 from app.database import get_db
-from app.models import User, Listing, Message, MarketPrice, UserRole
+from app.models import User, Listing, Message, MarketPrice, NotificationLog, UserRole
 from app.schemas import (
     ListingCreate, ListingUpdate, ListingResponse,
     MessageCreate, MessageResponse
@@ -22,15 +22,7 @@ router = APIRouter(prefix="/listings", tags=["marketplace"])
 
 @router.post("/", response_model=ListingResponse, status_code=status.HTTP_201_CREATED)
 def create_listing(
-    crop_name: str,
-    quantity_quintals: Decimal,
-    price_per_quintal: Decimal,
-    unit: str = "quintal",
-    location: Optional[str] = None,
-    latitude: Optional[Decimal] = None,
-    longitude: Optional[Decimal] = None,
-    description: Optional[str] = None,
-    file: Optional[UploadFile] = None,
+    listing_data: ListingCreate = Body(...),
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
@@ -41,33 +33,16 @@ def create_listing(
             detail="Only farmers can create listings"
         )
 
-    # Handle photo upload if provided
-    photo_path = None
-    if file:
-        import os
-        import uuid
-        UPLOAD_DIR = "app/static/uploads/listings"
-        os.makedirs(UPLOAD_DIR, exist_ok=True)
-
-        contents = file.file.read()
-        file_extension = file.filename.split('.')[-1] if '.' in file.filename else 'jpg'
-        filename = f"{uuid.uuid4()}.{file_extension}"
-        photo_path = os.path.join(UPLOAD_DIR, filename)
-
-        with open(photo_path, 'wb') as f:
-            f.write(contents)
-
     listing = Listing(
         seller_id=current_user.id,
-        crop_name=crop_name,
-        quantity_quintals=quantity_quintals,
-        price_per_quintal=price_per_quintal,
-        unit=unit,
-        location=location,
-        latitude=latitude,
-        longitude=longitude,
-        photo_path=photo_path,
-        description=description,
+        crop_name=listing_data.crop_name,
+        quantity_quintals=listing_data.quantity_quintals,
+        price_per_quintal=listing_data.price_per_quintal,
+        unit=listing_data.unit,
+        location=listing_data.location,
+        latitude=listing_data.latitude,
+        longitude=listing_data.longitude,
+        description=listing_data.description,
         status="open"
     )
     db.add(listing)
@@ -76,7 +51,7 @@ def create_listing(
 
     # Add market price benchmark (REQ-37)
     market_price = db.query(MarketPrice).filter(
-        MarketPrice.crop_name == crop_name
+        MarketPrice.crop_name == listing_data.crop_name
     ).order_by(desc(MarketPrice.date_recorded)).first()
 
     if market_price:
@@ -84,9 +59,9 @@ def create_listing(
         listing.market_price_updated = market_price.date_recorded
 
         # Determine price label
-        if price_per_quintal < market_price.price_per_quintal * Decimal("0.9"):
+        if listing_data.price_per_quintal < market_price.price_per_quintal * Decimal("0.9"):
             listing.price_label = "below"
-        elif price_per_quintal > market_price.price_per_quintal * Decimal("1.1"):
+        elif listing_data.price_per_quintal > market_price.price_per_quintal * Decimal("1.1"):
             listing.price_label = "above"
         else:
             listing.price_label = "near"
@@ -102,23 +77,37 @@ def get_listings(
     crop: Optional[str] = Query(None, description="Filter by crop name"),
     min_price: Optional[Decimal] = Query(None, description="Minimum price per quintal"),
     max_price: Optional[Decimal] = Query(None, description="Maximum price per quintal"),
+    min_quantity: Optional[Decimal] = Query(None, ge=0, description="Minimum available quantity in quintals"),
+    seller: Optional[str] = Query(None, description="Search seller display name"),
     lat: Optional[float] = Query(None, description="Latitude for distance filtering"),
     lon: Optional[float] = Query(None, description="Longitude for distance filtering"),
     max_distance_km: Optional[float] = Query(None, description="Maximum distance in km"),
     sort_by: Optional[str] = Query("newest", description="Sort by: newest, price, distance"),
+    limit: int = Query(24, ge=1, le=100),
+    offset: int = Query(0, ge=0),
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
     """Get listings with filters and sorting."""
-    query = db.query(Listing).filter(Listing.status == "open")
+    if min_price is not None and max_price is not None and min_price > max_price:
+        raise HTTPException(status_code=422, detail="Minimum price cannot exceed maximum price")
+    query = db.query(Listing).options(joinedload(Listing.seller)).filter(
+        Listing.status == "open", Listing.quantity_quintals > 0
+    )
+    if current_user.role == UserRole.BUYER:
+        query = query.filter(Listing.seller_id != current_user.id)
 
     # Apply filters
     if crop:
-        query = query.filter(Listing.crop_name.ilike(f"%{crop}%"))
-    if min_price:
+        query = query.filter(or_(Listing.crop_name.ilike(f"%{crop.strip()}%"), Listing.location.ilike(f"%{crop.strip()}%")))
+    if min_price is not None:
         query = query.filter(Listing.price_per_quintal >= min_price)
-    if max_price:
+    if max_price is not None:
         query = query.filter(Listing.price_per_quintal <= max_price)
+    if min_quantity is not None:
+        query = query.filter(Listing.quantity_quintals >= min_quantity)
+    if seller:
+        query = query.filter(Listing.seller.has(User.full_name.ilike(f"%{seller.strip()}%")))
 
     listings = query.all()
 
@@ -141,8 +130,12 @@ def get_listings(
         listings = filtered_listings
 
     # Sorting
-    if sort_by == "price":
+    if sort_by in {"price", "price_asc"}:
         listings.sort(key=lambda x: x.price_per_quintal)
+    elif sort_by == "price_desc":
+        listings.sort(key=lambda x: x.price_per_quintal, reverse=True)
+    elif sort_by == "quantity":
+        listings.sort(key=lambda x: x.quantity_quintals, reverse=True)
     elif sort_by == "distance" and lat is not None and lon is not None:
         listings.sort(key=lambda x: getattr(x, '_distance', float('inf')))
     else:  # newest
@@ -166,7 +159,7 @@ def get_listings(
                 else:
                     listing.price_label = "near"
 
-    return listings
+    return listings[offset:offset + limit]
 
 
 @router.get("/{listing_id}", response_model=ListingResponse)
@@ -247,56 +240,62 @@ def create_message(
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    """Send a message about a listing (farmer <-> buyer)."""
+    """Persist a listing conversation scoped to the buyer and seller."""
     listing = db.query(Listing).filter(Listing.id == listing_id).first()
     if not listing:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Listing not found"
-        )
+        raise HTTPException(status_code=404, detail="Listing not found")
+    if current_user.role == UserRole.BUYER:
+        buyer_id = current_user.id
+        if current_user.id == listing.seller_id:
+            raise HTTPException(status_code=400, detail="A seller cannot start a buyer conversation with themselves")
+    elif current_user.role == UserRole.FARMER and current_user.id == listing.seller_id:
+        buyer_id = message_data.recipient_buyer_id
+        if not buyer_id:
+            buyer_id = db.query(Message.buyer_id).filter(Message.listing_id == listing_id, Message.buyer_id.isnot(None)).order_by(Message.created_at.desc()).scalar()
+        buyer = db.query(User).filter(User.id == buyer_id, User.role == UserRole.BUYER).first() if buyer_id else None
+        started_thread = db.query(Message.id).filter(Message.listing_id == listing_id, Message.sender_id == buyer_id).first() if buyer_id else None
+        if not buyer or not started_thread:
+            raise HTTPException(status_code=400, detail="Select a buyer who has started a conversation on this listing")
+    else:
+        raise HTTPException(status_code=403, detail="Only the listing farmer and buyers can message about this listing")
 
-    # Validate that user is either seller or buyer
-    if current_user.role not in [UserRole.FARMER, UserRole.BUYER]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only farmers and buyers can send messages"
-        )
-
-    message = Message(
-        listing_id=listing_id,
-        sender_id=current_user.id,
-        content=message_data.content
-    )
+    message = Message(listing_id=listing_id, buyer_id=buyer_id, sender_id=current_user.id, content=message_data.content.strip())
+    if not message.content:
+        raise HTTPException(status_code=422, detail="Message cannot be empty")
     db.add(message)
+    recipient_id = listing.seller_id if current_user.role == UserRole.BUYER else buyer_id
+    db.add(NotificationLog(user_id=recipient_id, channel="in_app", subject="New marketplace message", content=f"{current_user.full_name} sent a message about {listing.crop_name}.", related_type="listing", related_id=listing.id, status="sent"))
     db.commit()
     db.refresh(message)
-
     return message
 
 
 @router.get("/{listing_id}/messages", response_model=List[MessageResponse])
 def get_messages(
     listing_id: int,
+    buyer_id: Optional[int] = None,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    """Get all messages for a listing."""
+    """Return only the requesting buyer's thread, or the seller's selected thread."""
     listing = db.query(Listing).filter(Listing.id == listing_id).first()
     if not listing:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Listing not found"
-        )
-
-    # Only seller and involved buyers can view messages
-    if current_user.id != listing.seller_id and current_user.role != UserRole.BUYER:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only the seller and buyers can view messages"
-        )
-
-    messages = db.query(Message).filter(
-        Message.listing_id == listing_id
-    ).order_by(Message.created_at.asc()).all()
-
+        raise HTTPException(status_code=404, detail="Listing not found")
+    query = db.query(Message).filter(Message.listing_id == listing_id)
+    if current_user.role == UserRole.BUYER:
+        if current_user.id == listing.seller_id:
+            raise HTTPException(status_code=403, detail="Listing sellers must use their farmer account")
+        query = query.filter(Message.buyer_id == current_user.id)
+    elif current_user.role == UserRole.FARMER and current_user.id == listing.seller_id:
+        if buyer_id is not None:
+            query = query.filter(Message.buyer_id == buyer_id)
+    else:
+        raise HTTPException(status_code=403, detail="Only the listing farmer and participating buyers can view messages")
+    messages = query.order_by(Message.created_at.asc(), Message.id.asc()).all()
+    if current_user.role == UserRole.BUYER:
+        unread = [message for message in messages if message.sender_id != current_user.id and message.read_at is None]
+        for message in unread:
+            message.read_at = datetime.utcnow()
+        if unread:
+            db.commit()
     return messages

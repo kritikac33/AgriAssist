@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { marketplaceAPI, type Listing, type Message } from '../api/marketplace';
 import { transactionsAPI, type Transaction } from '../api/transactions';
 import { useAuth } from '../contexts/AuthContext';
 import { formatError } from '../utils/errorFormatter';
+import { buyerAPI } from '../api/buyer';
 
 declare global {
   interface Window {
@@ -11,16 +13,21 @@ declare global {
 }
 
 export default function Marketplace() {
+  const [searchParams] = useSearchParams();
   const { user } = useAuth();
   const [listings, setListings] = useState<Listing[]>([]);
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [selectedListing, setSelectedListing] = useState<Listing | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [loading, setLoading] = useState(false);
+  const [messagesLoading, setMessagesLoading] = useState(false);
+  const [messageError, setMessageError] = useState('');
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
 
-  const [filter, setFilter] = useState({ crop: '', min_price: '', max_price: '' });
+  const [filter, setFilter] = useState({ crop: searchParams.get('crop') || '', min_price: '', max_price: '', min_quantity: '', seller: '', sort_by: 'newest' });
+  const [purchaseQuantity, setPurchaseQuantity] = useState(1);
+  const [offset, setOffset] = useState(0);
 
   const [newListing, setNewListing] = useState({
     crop_name: '',
@@ -34,30 +41,28 @@ export default function Marketplace() {
 
   useEffect(() => {
     fetchListings();
-    fetchTransactions();
   }, []);
 
-  const fetchListings = async () => {
+  const fetchListings = async (append = false) => {
     try {
       const params: any = {};
       if (filter.crop) params.crop = filter.crop;
       if (filter.min_price) params.min_price = Number(filter.min_price);
       if (filter.max_price) params.max_price = Number(filter.max_price);
+      if (filter.min_quantity) params.min_quantity = Number(filter.min_quantity);
+      if (filter.seller) params.seller = filter.seller;
+      params.sort_by = filter.sort_by;
+      params.limit = 24;
+      params.offset = append ? offset + 24 : 0;
       const data = await marketplaceAPI.getListings(params);
-      setListings(data);
+      setListings((current) => append ? [...current, ...data] : data);
+      setOffset(append ? offset + 24 : 0);
     } catch (err: any) {
       setError(formatError(err) || 'Failed to fetch listings');
     }
   };
 
-  const fetchTransactions = async () => {
-    try {
-      const data = await transactionsAPI.getTransactions();
-      setTransactions(data);
-    } catch (err: any) {
-      console.error('Failed to fetch transactions');
-    }
-  };
+
 
   const handleCreateListing = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -91,11 +96,17 @@ export default function Marketplace() {
 
   const handleViewListing = async (listing: Listing) => {
     setSelectedListing(listing);
+    setPurchaseQuantity(1);
+    setMessages([]);
+    setMessagesLoading(true);
+    setMessageError('');
     try {
       const msgs = await marketplaceAPI.getMessages(listing.id);
       setMessages(msgs);
-    } catch (err) {
-      console.error('Failed to fetch messages');
+    } catch (err: any) {
+      setMessageError(formatError(err) || 'Could not load this conversation. Please try again.');
+    } finally {
+      setMessagesLoading(false);
     }
   };
 
@@ -106,10 +117,11 @@ export default function Marketplace() {
     try {
       await marketplaceAPI.sendMessage(selectedListing.id, newMessage);
       setNewMessage('');
+      setMessageError('');
       const msgs = await marketplaceAPI.getMessages(selectedListing.id);
       setMessages(msgs);
     } catch (err: any) {
-      setError(formatError(err) || 'Failed to send message');
+      setMessageError(formatError(err) || 'Failed to send message');
     }
   };
 
@@ -119,45 +131,84 @@ export default function Marketplace() {
       return;
     }
 
+    if (!import.meta.env.VITE_RAZORPAY_KEY_ID) {
+      setError('Online payment is not configured. Please use the listing message thread to contact the farmer.');
+      return;
+    }
+
     setLoading(true);
     setError('');
 
+    let createdTransactionId: number | null = null;
     try {
-      const transaction = await transactionsAPI.createTransaction(listing.id);
+      const transaction = await transactionsAPI.createTransaction(listing.id, purchaseQuantity);
+      createdTransactionId = transaction.id;
+      if (!transaction.razorpay_order_id || transaction.razorpay_order_id.startsWith('order_mock_')) {
+        setError('Payment service is in demo mode. No payment was started; contact the farmer in this listing thread.');
+        setLoading(false);
+        return;
+      }
 
       if (!window.Razorpay) {
         const script = document.createElement('script');
         script.src = 'https://checkout.razorpay.com/v1/checkout.js';
         script.async = true;
         script.onload = () => openRazorpay(transaction, listing);
+        script.onerror = () => { void transactionsAPI.cancelUnpaid(transaction.id).catch(() => undefined); setError('Could not load payment checkout. The unpaid order was cancelled.'); setLoading(false); };
         document.body.appendChild(script);
       } else {
         openRazorpay(transaction, listing);
       }
     } catch (err: any) {
+      if (createdTransactionId !== null) await transactionsAPI.cancelUnpaid(createdTransactionId).catch(() => undefined);
       setError(formatError(err) || 'Failed to initiate transaction');
       setLoading(false);
     }
   };
 
+  const handleAddToCart = async (listing: Listing, quantity = 1) => {
+    try {
+      await buyerAPI.addToCart(listing.id, quantity);
+      setError('');
+      setSuccess(`${quantity} quintal(s) of ${listing.crop_name} added to your cart.`);
+    } catch (err: any) {
+      setError(formatError(err) || 'Could not add this listing to cart');
+    }
+  };
+
+  const handleSaveListing = async (listing: Listing) => {
+    try {
+      await buyerAPI.save(listing.id);
+      setError('');
+      setSuccess(`${listing.crop_name} saved to your listings.`);
+    } catch (err: any) {
+      setError(formatError(err) || 'Could not save this listing');
+    }
+  };
+
   const openRazorpay = (transaction: Transaction, listing: Listing) => {
     const options = {
-      key: 'rzp_test_DEMO_KEY',
-      amount: Number(listing.quantity_quintals) * Number(listing.price_per_quintal) * 100,
+      key: transaction.razorpay_key_id,
+      amount: Number(transaction.total_amount) * 100,
       currency: 'INR',
       name: 'AgriAssist',
       description: `Purchase ${listing.crop_name}`,
       order_id: transaction.razorpay_order_id,
-      handler: async (_response: any) => {
+      handler: async (payment: any) => {
         try {
-          const verified = await transactionsAPI.verifyTransaction(transaction.id);
-          if (verified.status === 'completed') {
-            alert('Payment successful!');
-            await fetchTransactions();
+          const verified = await transactionsAPI.verifyTransaction(transaction.id, {
+            razorpay_order_id: payment.razorpay_order_id,
+            razorpay_payment_id: payment.razorpay_payment_id,
+            razorpay_signature: payment.razorpay_signature,
+          });
+          if (verified.status === 'confirmed') {
+            setSuccess('Payment confirmed by the server.');
             await fetchListings();
+          } else {
+            setError(`Payment status: ${verified.status}`);
           }
-        } catch (err) {
-          setError('Payment verification failed');
+        } catch (err: any) {
+          setError(formatError(err) || 'Payment verification failed; confirmation was not received from the server.');
         }
         setLoading(false);
       },
@@ -173,32 +224,17 @@ export default function Marketplace() {
     const rzp = new window.Razorpay(options);
     rzp.open();
     rzp.on('payment.failed', () => {
-      setError('Payment failed');
+      void transactionsAPI.cancelUnpaid(transaction.id).catch(() => undefined);
+      setError('Payment failed. The unpaid order was cancelled and its quantity released.');
       setLoading(false);
     });
-  };
-
-  const getPriceBadgeColor = (label: string | null) => {
-    if (!label) return 'bg-gray-100 text-gray-800';
-    if (label === 'below') return 'bg-green-100 text-green-800';
-    if (label === 'near') return 'bg-blue-100 text-blue-800';
-    if (label === 'above') return 'bg-red-100 text-red-800';
-    return 'bg-gray-100 text-gray-800';
-  };
-
-  const getStatusColor = (status: string) => {
-    if (status === 'completed') return 'bg-green-100 text-green-800';
-    if (status === 'pending') return 'bg-amber-100 text-amber-800';
-    if (status === 'failed') return 'bg-red-100 text-red-800';
-    if (status === 'cancelled') return 'bg-gray-100 text-gray-800';
-    return 'bg-gray-100 text-gray-800';
   };
 
   return (
     <>
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-2">
-          <span className="text-4xl">🛒</span>
+          <span className="text-4xl" aria-hidden="true">🛒</span>
           Marketplace
         </h1>
         <p className="text-gray-600 mt-1">Browse crops, buy with Razorpay, or list your produce</p>
@@ -209,6 +245,7 @@ export default function Marketplace() {
           {error}
         </div>
       )}
+      {success && <div role="status" className="bg-green-50 border border-green-200 text-green-800 px-4 py-3 rounded-lg mb-6">{success}</div>}
 
       {user?.role === 'farmer' && (
         <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-200 mb-6">
@@ -269,7 +306,7 @@ export default function Marketplace() {
 
       <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-200 mb-6">
         <h2 className="text-xl font-semibold text-gray-900 mb-4">Filter Listings</h2>
-        <div className="flex gap-4 mb-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-4">
           <input
             type="text"
             placeholder="Crop name"
@@ -291,17 +328,21 @@ export default function Marketplace() {
             onChange={(e) => setFilter({ ...filter, max_price: e.target.value })}
             className="w-32 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
           />
+          {user?.role === 'buyer' && <input type="text" placeholder="Seller name" value={filter.seller} onChange={(e) => setFilter({ ...filter, seller: e.target.value })} className="px-3 py-2 border border-gray-300 rounded-lg" />}
+          <input type="number" min="0" placeholder="Minimum quantity (qtl)" value={filter.min_quantity} onChange={(e) => setFilter({ ...filter, min_quantity: e.target.value })} className="px-3 py-2 border border-gray-300 rounded-lg" />
+          <select aria-label="Sort listings" value={filter.sort_by} onChange={(e) => setFilter({ ...filter, sort_by: e.target.value })} className="px-3 py-2 border border-gray-300 rounded-lg"><option value="newest">Newest</option><option value="price_asc">Price: low to high</option><option value="price_desc">Price: high to low</option><option value="quantity">Quantity available</option></select>
           <button
-            onClick={fetchListings}
+            onClick={() => void fetchListings()}
             className="bg-primary-600 hover:bg-primary-700 text-white px-4 py-2 rounded-lg font-medium transition-colors"
           >
             Apply Filter
           </button>
+          <button onClick={() => { const clean = { crop: '', min_price: '', max_price: '', min_quantity: '', seller: '', sort_by: 'newest' }; setFilter(clean); setOffset(0); marketplaceAPI.getListings({ sort_by: 'newest', limit: 24, offset: 0 }).then(setListings).catch((err) => setError(formatError(err))); }} className="px-4 py-2 border rounded-lg text-gray-700">Clear all</button>
         </div>
       </div>
 
       <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-200 mb-6">
-        <h2 className="text-xl font-semibold text-gray-900 mb-4">Available Listings</h2>
+        <h2 className="text-xl font-semibold text-gray-900 mb-4">Available Listings ({listings.length} shown)</h2>
         {listings.length === 0 ? (
           <div className="text-center py-8 text-gray-500">
             <p>No listings found.</p>
@@ -315,34 +356,25 @@ export default function Marketplace() {
                   <p><span className="font-medium">Quantity:</span> {listing.quantity_quintals} quintals</p>
                   <p><span className="font-medium">Price:</span> ₹{listing.price_per_quintal}/quintal</p>
                   <p><span className="font-medium">Total:</span> ₹{(Number(listing.quantity_quintals) * Number(listing.price_per_quintal)).toFixed(2)}</p>
-                  <p><span className="font-medium">Location:</span> {listing.location}</p>
-                  {listing.price_label && (
-                    <span className={`inline-block px-3 py-1 rounded-full text-xs font-medium ${getPriceBadgeColor(listing.price_label)}`}>
-                      {listing.price_label.toUpperCase()} MARKET PRICE
-                    </span>
-                  )}
+                  <p><span className="font-medium">Location:</span> {listing.location || 'Not provided'}</p>
+                  <p><span className="font-medium">Seller:</span> {listing.seller_name || 'Farmer'}</p>
+                  <p className="text-xs text-gray-500">Listed {new Date(listing.created_at).toLocaleDateString()} · Available</p>
                 </div>
                 <div className="flex gap-2">
                   <button
                     onClick={() => handleViewListing(listing)}
                     className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-lg font-medium transition-colors"
                   >
-                    View Details
+                    View Listing
                   </button>
-                  {user?.role === 'buyer' && listing.status === 'open' && (
-                    <button
-                      onClick={() => handleBuyNow(listing)}
-                      disabled={loading}
-                      className="flex-1 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      Buy Now
-                    </button>
-                  )}
+                  {user?.role === 'buyer' && <button onClick={() => void handleAddToCart(listing)} className="flex-1 bg-primary-600 text-white px-3 py-2 rounded-lg">Add to Cart</button>}
+                  {user?.role === 'buyer' && <button onClick={() => void handleSaveListing(listing)} aria-label={`Save ${listing.crop_name}`} className="px-3 py-2 border border-primary-300 rounded-lg">♡</button>}
                 </div>
               </div>
             ))}
           </div>
         )}
+        {listings.length >= 24 && <button onClick={() => void fetchListings(true)} className="mt-5 rounded border px-4 py-2">Load more</button>}
       </div>
 
       {selectedListing && (
@@ -360,20 +392,23 @@ export default function Marketplace() {
             <p><span className="font-medium">Crop:</span> {selectedListing.crop_name}</p>
             <p><span className="font-medium">Quantity:</span> {selectedListing.quantity_quintals} quintals</p>
             <p><span className="font-medium">Price:</span> ₹{selectedListing.price_per_quintal}/quintal</p>
+            <p><span className="font-medium">Seller:</span> {selectedListing.seller_name || 'Farmer'}</p>
+            <label className="block">Quantity to buy (quintals)<input type="number" min="0.01" max={Number(selectedListing.quantity_quintals)} step="0.01" value={purchaseQuantity} onChange={(e) => setPurchaseQuantity(Number(e.target.value))} className="mt-1 block w-full max-w-xs px-3 py-2 border rounded-lg" /></label>
+            <p>Subtotal: ₹{(purchaseQuantity * Number(selectedListing.price_per_quintal)).toFixed(2)}</p>
+            {user?.role === 'buyer' && <button onClick={() => void handleAddToCart(selectedListing, purchaseQuantity)} disabled={purchaseQuantity <= 0 || purchaseQuantity > Number(selectedListing.quantity_quintals)} className="bg-primary-600 text-white px-4 py-2 rounded-lg disabled:opacity-50">Add selected quantity to Cart</button>}
+            {selectedListing.description && <p><span className="font-medium">Description:</span> {selectedListing.description}</p>}
             <p><span className="font-medium">Status:</span> {selectedListing.status}</p>
-            {selectedListing.market_price_benchmark && (
-              <p><span className="font-medium">Market Price Benchmark:</span> ₹{selectedListing.market_price_benchmark}/quintal</p>
-            )}
           </div>
 
-          <h3 className="text-lg font-semibold text-gray-900 mb-2">Messages</h3>
+          <div className="flex items-center justify-between mb-2"><h3 className="text-lg font-semibold text-gray-900">Messages</h3>{user?.role === 'buyer' && selectedListing.status === 'open' && <button onClick={() => setNewMessage('Hello, I am interested in this listing. Can we discuss availability and payment?')} className="bg-primary-600 hover:bg-primary-700 text-white px-4 py-2 rounded-lg">Contact Farmer / Discuss Payment</button>} {user?.role === 'buyer' && selectedListing.status === 'open' && import.meta.env.VITE_RAZORPAY_KEY_ID && <button onClick={() => handleBuyNow(selectedListing)} disabled={loading || purchaseQuantity <= 0 || purchaseQuantity > Number(selectedListing.quantity_quintals)} className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg disabled:opacity-50">Buy Now</button>}</div>
+          {messageError && <p className="mb-2 rounded bg-red-50 p-3 text-sm text-red-800">{messageError}</p>}
           <div className="bg-gray-50 rounded-lg p-4 min-h-[150px] max-h-[300px] overflow-y-auto mb-4">
-            {messages.length === 0 ? (
+            {messagesLoading ? <p className="text-gray-500 text-center">Loading conversation…</p> : messages.length === 0 ? (
               <p className="text-gray-500 text-center">No messages yet.</p>
             ) : (
               messages.map((msg) => (
                 <div key={msg.id} className="bg-white p-3 rounded mb-2 shadow-sm">
-                  <small className="text-gray-500">{msg.created_at}</small>
+                  <small className="text-gray-500">{msg.sender_id === user?.id ? 'You' : msg.sender_name || 'Farmer / buyer'} · {new Date(msg.created_at).toLocaleString()}</small>
                   <p>{msg.content}</p>
                 </div>
               ))
@@ -397,52 +432,7 @@ export default function Marketplace() {
         </div>
       )}
 
-      <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
-        <h2 className="text-xl font-semibold text-gray-900 mb-4">Your Transactions</h2>
-        {transactions.length === 0 ? (
-          <div className="text-center py-8 text-gray-500">
-            <p>No transactions yet.</p>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="bg-primary-50 border-b border-primary-200">
-                  <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">ID</th>
-                  <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Listing ID</th>
-                  <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Amount</th>
-                  <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Status</th>
-                  <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Date</th>
-                </tr>
-              </thead>
-              <tbody>
-                {transactions.map((txn, index) => (
-                  <tr key={txn.id} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                    <td className="px-4 py-3 text-sm">{txn.id}</td>
-                    <td className="px-4 py-3 text-sm">{txn.listing_id}</td>
-                    <td className="px-4 py-3 text-sm font-medium">₹{Number(txn.total_amount).toFixed(2)}</td>
-                    <td className="px-4 py-3 text-sm">
-                      <span className={`px-3 py-1 rounded-full text-xs font-medium ${getStatusColor(txn.status)}`}>
-                        {txn.status}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-sm">{txn.created_at}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
 
-      <div className="bg-amber-50 border border-amber-200 rounded-lg p-6 mt-6">
-        <h3 className="text-lg font-semibold text-gray-900 mb-2">Razorpay Test Card Numbers</h3>
-        <div className="space-y-1 text-sm text-gray-700">
-          <p><span className="font-medium">Success:</span> 4111 1111 1111 1111 (any expiry, any CVV)</p>
-          <p><span className="font-medium">Failure:</span> 4111 1111 1111 1111 (expires this month)</p>
-          <p><span className="font-medium">Netbanking:</span> Select any bank from the list</p>
-        </div>
-      </div>
     </>
   );
 }

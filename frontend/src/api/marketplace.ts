@@ -3,11 +3,13 @@ import api from './axios';
 export interface Listing {
   id: number;
   seller_id: number;
+  seller_name?: string | null;
   crop_name: string;
   quantity_quintals: string;
   price_per_quintal: string;
   unit: string;
   location: string | null;
+  description?: string | null;
   latitude: string | null;
   longitude: string | null;
   photo_path: string | null;
@@ -23,6 +25,8 @@ export interface Message {
   id: number;
   listing_id: number;
   sender_id: number;
+  buyer_id?: number | null;
+  sender_name?: string | null;
   content: string;
   created_at: string;
 }
@@ -32,6 +36,10 @@ export const marketplaceAPI = {
     crop?: string;
     min_price?: number;
     max_price?: number;
+    min_quantity?: number;
+    seller?: string;
+    limit?: number;
+    offset?: number;
     lat?: number;
     lon?: number;
     sort_by?: string;

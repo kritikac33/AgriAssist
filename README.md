@@ -834,3 +834,11 @@ Potential enhancements for future development:
 ## Support
 
 For issues and questions, please open an issue on the repository.
+
+## Advisory and Payment API updates
+
+Run `alembic upgrade head` before starting the backend to apply migrations `005` through `007`. Migration `005` adds soil moisture, structured irrigation inputs, immutable yield input snapshots/model versions, per-buyer message thread IDs, and a unique crop prediction version constraint. Migration `006` adds persistent buyer carts and saved listings, plus immutable transaction crop, seller, and unit-price snapshots. Migration `007` adds saved delivery addresses, order fulfilment history, cancellation requests, message read timestamps, in-app notification metadata, and buyer support tickets. Existing transaction rows are backfilled from the available listing/account data; historical source details that were never recorded cannot be recovered.
+
+Buyer portal routes include `/dashboard`, `/marketplace`, `/cart`, `/orders`, `/messages`, `/saved-listings`, `/addresses`, and `/notifications`. Cart items are grouped by farmer and paid as separate listing transactions using the existing Razorpay flow. Checkout supports pickup or delivery to a saved address; listing quantities are reserved while payment is pending. Failed checkout can release reserved stock, while dismissing Razorpay leaves the order pending until its status is checked or the buyer explicitly cancels it. Buyers can request cancellation after payment, but refunds are not automatic or implemented. Farmers can track their orders at `/farmer-orders` and move paid orders through the permitted fulfilment steps. Support reports are recorded for follow-up; no support-agent response workflow is included.
+
+Online payments require `RAZORPAY_KEY_ID` and `RAZORPAY_KEY_SECRET` in the backend environment, plus `VITE_RAZORPAY_KEY_ID` in `frontend/.env.local`. Without a configured Razorpay SDK and credentials, the backend returns a service-unavailable response and never marks a demo transaction paid.

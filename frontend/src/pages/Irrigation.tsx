@@ -13,6 +13,11 @@ export default function Irrigation() {
   const [crops, setCrops] = useState<CropResponse[]>([]);
   const [selectedFarmId, setSelectedFarmId] = useState<number | null>(null);
   const [cropId, setCropId] = useState<number | null>(null);
+  const [areaHectares, setAreaHectares] = useState(1);
+  const [soilMoisture, setSoilMoisture] = useState(30);
+  const [recentRainfall, setRecentRainfall] = useState(0);
+  const [temperature, setTemperature] = useState(28);
+  const [cropStage, setCropStage] = useState('mid');
   const [schedules, setSchedules] = useState<IrrigationScheduleResponse[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -41,7 +46,8 @@ export default function Irrigation() {
           if (farmCrops.data.length > 0) {
             setCropId(farmCrops.data[0].id);
           }
-          await fetchSchedules();
+          const scheduleData = await irrigationAPI.getSchedules(userFarms.data[0].id);
+          setSchedules(scheduleData.data);
         }
       } catch (err) {
         console.error('Failed to fetch farms/crops:', err);
@@ -58,7 +64,8 @@ export default function Irrigation() {
       const farmCrops = await cropAPI.getCrops(farmId);
       setCrops(farmCrops.data);
       setCropId(farmCrops.data.length > 0 ? farmCrops.data[0].id : null);
-      await fetchSchedules();
+      const scheduleData = await irrigationAPI.getSchedules(farmId);
+      setSchedules(scheduleData.data);
     } catch (err) {
       console.error('Failed to fetch crops:', err);
       setCrops([]);
@@ -79,8 +86,14 @@ export default function Irrigation() {
     try {
       await irrigationAPI.createSchedule({
         farm_id: selectedFarmId,
-        scheduled_date: new Date().toISOString().split('T')[0],
-        water_amount_liters: 1000,
+        crop_id: cropId,
+        crop_stage: cropStage,
+        area_hectares: areaHectares,
+        soil_type: farms.find((farm) => farm.id === selectedFarmId)?.soil_type || undefined,
+        soil_moisture_percent: soilMoisture,
+        rainfall_mm: recentRainfall,
+        temperature_c: temperature,
+        scheduled_date: new Date(Date.now() + 86400000).toISOString(),
         status: 'pending',
       });
       await fetchSchedules();
@@ -121,10 +134,10 @@ export default function Irrigation() {
     <>
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-2">
-          <span className="text-4xl">💧</span>
+          <span className="text-4xl" aria-hidden="true">💧</span>
           Irrigation Schedule
         </h1>
-        <p className="text-gray-600 mt-1">Generate weather-driven irrigation schedules for your crops</p>
+        <p className="text-gray-600 mt-1">Estimate crop water needs with local weather when available; fallback weather is labelled</p>
       </div>
 
       {loadingData ? (
@@ -182,9 +195,16 @@ export default function Irrigation() {
                 </div>
               </div>
 
+              <label className="block text-sm font-medium text-gray-700">Crop growth stage<select value={cropStage} onChange={(e) => setCropStage(e.target.value)} className="mt-1 w-full px-3 py-2 border rounded-lg"><option value="initial">Initial</option><option value="development">Development</option><option value="mid">Mid-season</option><option value="late">Late-season</option></select></label>
+              <div className="grid grid-cols-2 gap-4">
+                <label className="text-sm font-medium text-gray-700">Irrigated area (ha)<input type="number" min="0.01" step="0.01" value={areaHectares} onChange={(e) => setAreaHectares(Number(e.target.value))} className="mt-1 w-full px-3 py-2 border rounded-lg" required /></label>
+                <label className="text-sm font-medium text-gray-700">Soil moisture (%)<input type="number" min="0" max="100" value={soilMoisture} onChange={(e) => setSoilMoisture(Number(e.target.value))} className="mt-1 w-full px-3 py-2 border rounded-lg" /></label>
+                <label className="text-sm font-medium text-gray-700">Recent rainfall (mm)<input type="number" min="0" value={recentRainfall} onChange={(e) => setRecentRainfall(Number(e.target.value))} className="mt-1 w-full px-3 py-2 border rounded-lg" /></label>
+                <label className="text-sm font-medium text-gray-700">Temperature (°C)<input type="number" min="-10" max="60" value={temperature} onChange={(e) => setTemperature(Number(e.target.value))} className="mt-1 w-full px-3 py-2 border rounded-lg" /></label>
+              </div>
               <button
                 type="submit"
-                disabled={loading}
+                disabled={loading || areaHectares <= 0}
                 className="w-full bg-primary-600 hover:bg-primary-700 text-white font-medium py-2.5 px-4 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {loading ? 'Generating...' : 'Generate Schedule'}
@@ -211,20 +231,24 @@ export default function Irrigation() {
                     <tr className="bg-primary-50 border-b border-primary-200">
                       <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Date</th>
                       <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Water (L)</th>
+                      <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Duration</th>
                       <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Status</th>
+                      <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Recommendation</th>
                       <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
                     {schedules.map((schedule, index) => (
                       <tr key={schedule.id} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                        <td className="px-4 py-3 text-sm">{schedule.scheduled_date}</td>
-                        <td className="px-4 py-3 text-sm">{schedule.water_amount_liters}</td>
+                        <td className="px-4 py-3 text-sm">{new Date(schedule.scheduled_date).toLocaleString()}</td>
+                        <td className="px-4 py-3 text-sm">{Number(schedule.water_amount_liters || 0) <= 0 ? 'No irrigation needed' : `${Number(schedule.water_amount_liters).toLocaleString()} L`}</td>
+                        <td className="px-4 py-3 text-sm">{schedule.duration_hours ? `${schedule.duration_hours} h` : 'Not set (flow rate needed)'}</td>
                         <td className="px-4 py-3 text-sm">
                           <span className={`px-3 py-1 rounded-full text-xs font-medium ${getStatusColor(schedule.status)}`}>
                             {schedule.status}
                           </span>
                         </td>
+                        <td className="px-4 py-3 text-xs text-gray-600 max-w-sm">{schedule.notes || 'No calculation notes available.'} {schedule.weather_source && <span className="block">Weather: {schedule.weather_source}</span>}</td>
                         <td className="px-4 py-3 text-sm">
                           <div className="flex gap-2">
                             <button

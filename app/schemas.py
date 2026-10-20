@@ -1,5 +1,5 @@
 from pydantic import BaseModel, EmailStr, Field
-from typing import Optional
+from typing import Optional, Literal
 from datetime import datetime
 from decimal import Decimal
 from app.models import UserRole
@@ -160,11 +160,12 @@ class DiagnosisWithTreatment(DiagnosisResponse):
 # Soil Record Schemas
 class SoilRecordBase(BaseModel):
     farm_id: int
-    ph_level: Optional[Decimal] = None
-    nitrogen: Optional[Decimal] = None
-    phosphorus: Optional[Decimal] = None
-    potassium: Optional[Decimal] = None
-    organic_matter: Optional[Decimal] = None
+    ph_level: Optional[Decimal] = Field(default=None, ge=0, le=14)
+    nitrogen: Optional[Decimal] = Field(default=None, ge=0)
+    phosphorus: Optional[Decimal] = Field(default=None, ge=0)
+    potassium: Optional[Decimal] = Field(default=None, ge=0)
+    organic_matter: Optional[Decimal] = Field(default=None, ge=0, le=100)
+    moisture: Optional[Decimal] = Field(default=None, ge=0, le=100)
     source: str = "manual"
 
 
@@ -191,11 +192,23 @@ class SoilAnalysis(BaseModel):
     phosphorus_explanation: str
     potassium_status: str
     potassium_explanation: str
+    organic_matter_status: str = "unknown"
+    organic_matter_explanation: str = "Organic matter status unavailable."
+    moisture_status: str = "unknown"
+    moisture_explanation: str = "Moisture status unavailable."
 
 
 # Irrigation Schedule Schemas
 class IrrigationScheduleBase(BaseModel):
     farm_id: int
+    crop_id: Optional[int] = None
+    area_hectares: Optional[Decimal] = Field(default=None, gt=0)
+    soil_type: Optional[str] = Field(default=None, max_length=100)
+    crop_stage: Optional[Literal["initial", "development", "mid", "late"]] = None
+    soil_moisture_percent: Optional[Decimal] = Field(default=None, ge=0, le=100)
+    rainfall_mm: Optional[Decimal] = Field(default=None, ge=0)
+    temperature_c: Optional[Decimal] = Field(default=None, ge=-10, le=60)
+    weather_source: Optional[str] = None
     scheduled_date: datetime
     duration_hours: Optional[Decimal] = None
     water_amount_liters: Optional[Decimal] = None
@@ -208,6 +221,13 @@ class IrrigationScheduleCreate(IrrigationScheduleBase):
 
 
 class IrrigationScheduleUpdate(BaseModel):
+    crop_id: Optional[int] = None
+    area_hectares: Optional[Decimal] = Field(default=None, gt=0)
+    soil_type: Optional[str] = Field(default=None, max_length=100)
+    crop_stage: Optional[Literal["initial", "development", "mid", "late"]] = None
+    soil_moisture_percent: Optional[Decimal] = Field(default=None, ge=0, le=100)
+    rainfall_mm: Optional[Decimal] = Field(default=None, ge=0)
+    temperature_c: Optional[Decimal] = Field(default=None, ge=-10, le=60)
     scheduled_date: Optional[datetime] = None
     duration_hours: Optional[Decimal] = None
     water_amount_liters: Optional[Decimal] = None
@@ -252,6 +272,7 @@ class ListingResponse(ListingBase):
     seller_id: int
     created_at: datetime
     updated_at: datetime
+    seller_name: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -260,6 +281,9 @@ class ListingResponse(ListingBase):
 # Transaction Schemas
 class TransactionBase(BaseModel):
     listing_id: Optional[int] = None
+    crop_name_snapshot: Optional[str] = None
+    seller_name_snapshot: Optional[str] = None
+    unit_price_snapshot: Optional[Decimal] = None
     buyer_id: Optional[int] = None
     seller_id: Optional[int] = None
     quantity_quintals: Decimal
@@ -269,15 +293,26 @@ class TransactionBase(BaseModel):
     status: str = "initiated"
 
 
-class TransactionCreate(TransactionBase):
-    pass
+class TransactionCreate(BaseModel):
+    listing_id: int
+    quantity_quintals: Optional[Decimal] = Field(default=None, gt=0)
+    delivery_method: Literal["delivery", "pickup"] = "pickup"
+    delivery_address_id: Optional[int] = None
+    delivery_instructions: Optional[str] = Field(default=None, max_length=2000)
 
 
 class TransactionResponse(TransactionBase):
+    razorpay_key_id: Optional[str] = None
     id: int
     transaction_date: datetime
     created_at: datetime
     updated_at: datetime
+    delivery_method: Optional[str] = None
+    delivery_address_snapshot: Optional[dict] = None
+    delivery_instructions: Optional[str] = None
+    fulfillment_status: str = "awaiting_payment"
+    cancellation_requested_at: Optional[datetime] = None
+    cancellation_reason: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -492,8 +527,16 @@ class CropNutrientRequirementResponse(CropNutrientRequirementBase):
 class YieldPredictionBase(BaseModel):
     farm_id: int
     crop_id: int
-    land_size_acres: Decimal
+    land_size_acres: Decimal = Field(gt=0, le=100000)
     planting_date: datetime
+    ph_level: Optional[Decimal] = Field(default=None, ge=0, le=14)
+    nitrogen: Optional[Decimal] = Field(default=None, ge=0)
+    phosphorus: Optional[Decimal] = Field(default=None, ge=0)
+    potassium: Optional[Decimal] = Field(default=None, ge=0)
+    soil_moisture_percent: Optional[Decimal] = Field(default=None, ge=0, le=100)
+    rainfall_mm: Optional[Decimal] = Field(default=None, ge=0)
+    irrigation_mm: Optional[Decimal] = Field(default=None, ge=0)
+    temperature_c: Optional[Decimal] = Field(default=None, ge=-10, le=60)
 
 
 class YieldPredictionCreate(YieldPredictionBase):
@@ -509,6 +552,8 @@ class YieldPredictionResponse(YieldPredictionBase):
     harvest_window_start: Optional[datetime] = None
     harvest_window_end: Optional[datetime] = None
     version: int
+    input_snapshot: Optional[dict] = None
+    model_version: Optional[str] = None
     created_at: datetime
 
     class Config:
@@ -588,6 +633,7 @@ class ListingResponse(ListingBase):
     market_price_updated: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
+    seller_name: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -599,13 +645,16 @@ class MessageBase(BaseModel):
 
 
 class MessageCreate(MessageBase):
-    pass
+    content: str = Field(min_length=1, max_length=5000)
+    recipient_buyer_id: Optional[int] = None
 
 
 class MessageResponse(MessageBase):
     id: int
     listing_id: int
     sender_id: int
+    buyer_id: Optional[int] = None
+    sender_name: Optional[str] = None
     created_at: datetime
 
     class Config:
@@ -614,6 +663,12 @@ class MessageResponse(MessageBase):
 
 class TransactionUpdate(BaseModel):
     status: str
+
+
+class PaymentVerificationRequest(BaseModel):
+    razorpay_order_id: str
+    razorpay_payment_id: str
+    razorpay_signature: str
 
 
 # Scheme Schemas

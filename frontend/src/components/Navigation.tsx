@@ -1,122 +1,58 @@
-import { Link, useLocation } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Link, NavLink } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { buyerAPI } from '../api/buyer';
+import './Navigation.css';
+
+const navLinks = {
+  farmer: [
+    { path: '/dashboard', label: 'Dashboard' }, { path: '/farms-and-crops', label: 'Farms & Crops' },
+    { path: '/disease-scan', label: 'Disease Scan' }, { path: '/soil-health', label: 'Soil Health' },
+    { path: '/irrigation', label: 'Irrigation' }, { path: '/yield-prediction', label: 'Yield' },
+    { path: '/alerts', label: 'Alerts' }, { path: '/marketplace', label: 'Marketplace' },
+    { path: '/farmer-orders', label: 'Orders' }, { path: '/finance', label: 'Finance' }, { path: '/schemes', label: 'Schemes' },
+  ],
+  buyer: [
+    { path: '/dashboard', label: 'Dashboard' }, { path: '/marketplace', label: 'Marketplace' },
+    { path: '/cart', label: 'Cart' }, { path: '/orders', label: 'My Orders' },
+    { path: '/messages', label: 'Messages' }, { path: '/saved-listings', label: 'Saved' },
+    { path: '/addresses', label: 'Addresses' }, { path: '/notifications', label: 'Updates' },
+  ],
+  officer: [{ path: '/dashboard', label: 'Dashboard' }, { path: '/alerts', label: 'Alerts' }],
+  admin: [{ path: '/dashboard', label: 'Dashboard' }, { path: '/admin', label: 'Admin Panel' }],
+};
 
 export function Navigation() {
   const { user, role, logout } = useAuth();
-  const location = useLocation();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [cartCount, setCartCount] = useState(0);
 
-  if (!user) {
-    return null;
-  }
+  useEffect(() => {
+    if (role !== 'buyer') return;
+    const refresh = () => buyerAPI.dashboard().then((data) => setCartCount(data.cart_item_count)).catch(() => {});
+    refresh();
+    window.addEventListener('buyer-cart-updated', refresh);
+    return () => window.removeEventListener('buyer-cart-updated', refresh);
+  }, [role]);
+  if (!user) return null;
+  const links = role ? navLinks[role as keyof typeof navLinks] || [] : [];
 
-  const navLinks = {
-    farmer: [
-      { path: '/dashboard', label: 'Dashboard', icon: '🏠' },
-      { path: '/farms-and-crops', label: 'Farms & Crops', icon: '🌾' },
-      { path: '/disease-scan', label: 'Disease', icon: '🔬' },
-      { path: '/soil-health', label: 'Soil', icon: '🌱' },
-      { path: '/irrigation', label: 'Irrigation', icon: '💧' },
-      { path: '/yield-prediction', label: 'Yield', icon: '📊' },
-      { path: '/alerts', label: 'Alerts', icon: '🚨' },
-      { path: '/marketplace', label: 'Market', icon: '🛒' },
-      { path: '/finance', label: 'Finance', icon: '💰' },
-      { path: '/schemes', label: 'Schemes', icon: '🏛️' },
-    ],
-    buyer: [
-      { path: '/dashboard', label: 'Dashboard', icon: '🏠' },
-      { path: '/marketplace', label: 'Marketplace', icon: '🛒' },
-    ],
-    officer: [
-      { path: '/dashboard', label: 'Dashboard', icon: '🏠' },
-      { path: '/alerts', label: 'Alerts', icon: '🚨' },
-    ],
-    admin: [
-      { path: '/dashboard', label: 'Dashboard', icon: '🏠' },
-      { path: '/admin', label: 'Admin Panel', icon: '⚙️' },
-    ],
-  };
-
-  const currentLinks = role ? navLinks[role] || [] : [];
-
-  return (
-    <nav className="bg-[#166534] text-white shadow-lg sticky top-0 z-50">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-14">
-          <div className="flex items-center flex-1">
-            <Link to="/dashboard" className="flex-shrink-0 mr-6">
-              <h1 className="text-lg font-bold text-white">AgriAssist</h1>
-            </Link>
-            <div className="hidden md:flex items-center flex-1 overflow-x-auto no-scrollbar">
-              <div className="flex items-center gap-1 whitespace-nowrap">
-                {currentLinks.map((link: { path: string; label: string; icon: string }) => (
-                  <Link
-                    key={link.path}
-                    to={link.path}
-                    className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                      location.pathname === link.path
-                        ? 'bg-[#22a55a] text-white'
-                        : 'text-green-100 hover:bg-[#22a55a]'
-                    }`}
-                  >
-                    <span className="mr-1">{link.icon}</span>
-                    {link.label}
-                  </Link>
-                ))}
-              </div>
-            </div>
-          </div>
-          <div className="hidden md:flex items-center gap-3 flex-shrink-0">
-            <span className="text-xs text-green-100 truncate max-w-[120px]">
-              {user.full_name}
-            </span>
-            <span className="text-xs bg-[#22a55a] px-2 py-0.5 rounded-full font-medium">
-              {role}
-            </span>
-            <button
-              onClick={logout}
-              className="bg-[#22a55a] hover:bg-[#1a8a4a] text-white px-3 py-1.5 rounded-md text-xs font-medium transition-colors"
-            >
-              Logout
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Mobile menu */}
-      <div className="md:hidden border-t border-[#22a55a]">
-        <div className="px-2 pt-2 pb-3 space-y-1">
-          {currentLinks.map((link: { path: string; label: string; icon: string }) => (
-            <Link
-              key={link.path}
-              to={link.path}
-              className={`block px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                location.pathname === link.path
-                  ? 'bg-[#22a55a] text-white'
-                  : 'text-green-100 hover:bg-[#22a55a]'
-              }`}
-            >
-              <span className="mr-1">{link.icon}</span>
-              {link.label}
-            </Link>
-          ))}
-          <div className="border-t border-[#22a55a] pt-4 mt-4">
-            <div className="px-3 py-2 text-sm text-green-100">
-              {user.full_name}
-            </div>
-            <div className="px-3 py-2">
-              <span className="text-xs bg-[#22a55a] px-2 py-1 rounded-full">
-                {role}
-              </span>
-            </div>
-            <button
-              onClick={logout}
-              className="w-full text-left px-3 py-2 text-sm font-medium text-green-100 hover:bg-[#22a55a] rounded-md transition-colors"
-            >
-              Logout
-            </button>
-          </div>
-        </div>
-      </div>
-    </nav>
-  );
+  return <header className="app-header">
+    <div className="app-header-inner">
+      <Link to="/dashboard" className="app-brand" aria-label="AgriAssist home">
+        <span className="brand-mark" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none"><path d="M25.8 6.3C15 6.3 7 10.7 7 19.2c0 3.7 2.5 6.3 6.1 6.3 8.6 0 12.7-8.1 12.7-19.2Z" fill="currentColor"/><path d="M5 27c3.7-6.7 8.4-10.4 15.6-13.4" stroke="#123d2b" strokeWidth="2" strokeLinecap="round"/></svg></span>
+        <span>AgriAssist<small>Farm intelligence</small></span>
+      </Link>
+      <button className="mobile-nav-toggle" type="button" aria-expanded={menuOpen} aria-controls="primary-navigation" onClick={() => setMenuOpen((open) => !open)}>
+        <span>{menuOpen ? 'Close' : 'Menu'}</span><span aria-hidden="true">{menuOpen ? '×' : '☰'}</span>
+      </button>
+      <nav id="primary-navigation" aria-label={`${role || 'Main'} navigation`} className={`app-nav ${menuOpen ? 'is-open' : ''}`}>
+        {links.map((item) => <NavLink key={item.path} to={item.path} end={item.path === '/dashboard'} onClick={() => setMenuOpen(false)} className={({ isActive }) => `app-nav-link ${isActive ? 'active' : ''}`}>
+          {item.label}{item.path === '/cart' && cartCount > 0 && <span className="nav-count">{cartCount}</span>}
+        </NavLink>)}
+        <div className="mobile-profile"><span>{user.full_name}</span><span className="role-chip">{role}</span><button type="button" onClick={logout}>Log out</button></div>
+      </nav>
+      <div className="header-profile"><div className="profile-avatar" aria-hidden="true">{user.full_name?.trim().charAt(0).toUpperCase() || 'A'}</div><div className="profile-text"><span>{user.full_name}</span><small>{role}</small></div><button type="button" onClick={logout} className="logout-button">Log out</button></div>
+    </div>
+  </header>;
 }

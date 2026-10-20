@@ -7,7 +7,7 @@ interface CardProps {
 }
 
 export function Card({ children, className = '', onClick }: CardProps) {
-  const baseClasses = 'bg-white rounded-lg shadow-md hover:shadow-lg transition-shadow duration-200';
+  const baseClasses = 'app-card bg-white rounded-lg shadow-md hover:shadow-lg transition-shadow duration-200';
   const clickableClasses = onClick ? 'cursor-pointer' : '';
   
   return (

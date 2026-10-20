@@ -15,7 +15,7 @@ from app.auth import (
     require_role
 )
 from app.config import settings
-from app.routers import diagnoses, soil, irrigation, yield_predictions, alerts, marketplace, transactions, schemes, finance, admin, farms, crops
+from app.routers import diagnoses, soil, irrigation, yield_predictions, alerts, marketplace, transactions, schemes, finance, admin, farms, crops, buyer
 
 # Create database tables (for development - in production use Alembic migrations)
 # Base.metadata.create_all(bind=engine)
@@ -43,6 +43,7 @@ app.include_router(yield_predictions.router)
 app.include_router(alerts.router)
 app.include_router(marketplace.router)
 app.include_router(transactions.router)
+app.include_router(buyer.router)
 app.include_router(schemes.router)
 app.include_router(finance.router)
 app.include_router(admin.router)

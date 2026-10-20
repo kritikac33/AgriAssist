@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { RoleRoute } from '../components/RoleRoute';
 import { PageLayout } from '../components/PageLayout';
 import { FarmCropSelector } from '../components/FarmCropSelector';
 import { Button } from '../components/Button';
@@ -302,9 +301,5 @@ function DiseaseScanContent() {
 }
 
 export default function DiseaseScan() {
-  return (
-    <RoleRoute allowedRoles={['farmer']}>
-      <DiseaseScanContent />
-    </RoleRoute>
-  );
+  return <DiseaseScanContent />;
 }

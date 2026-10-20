@@ -50,7 +50,10 @@ class WeatherService:
                 "wind_speed": data["wind"]["speed"],
                 "description": data["weather"][0]["description"],
                 "pressure": data["main"]["pressure"],
-                "rainfall_24h": data.get("rain", {}).get("1h", 0) * 24 + data.get("rain", {}).get("3h", 0) * 8,
+                # OpenWeatherMap's `1h` and `3h` fields are observed totals for
+                # those windows, not hourly rates. Multiplying them into a 24h
+                # estimate greatly overstates rainfall and can zero irrigation.
+                "rainfall_24h": data.get("rain", {}).get("3h", data.get("rain", {}).get("1h", 0)),
                 "latitude": latitude,
                 "longitude": longitude,
                 "source": "openweathermap"

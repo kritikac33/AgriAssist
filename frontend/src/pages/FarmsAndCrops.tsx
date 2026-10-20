@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react';
-import { RoleRoute } from '../components/RoleRoute';
 import { PageLayout } from '../components/PageLayout';
 import { Button } from '../components/Button';
 import { Card } from '../components/Card';
@@ -450,9 +449,5 @@ function FarmsAndCropsContent() {
 }
 
 export default function FarmsAndCrops() {
-  return (
-    <RoleRoute allowedRoles={['farmer']}>
-      <FarmsAndCropsContent />
-    </RoleRoute>
-  );
+  return <FarmsAndCropsContent />;
 }

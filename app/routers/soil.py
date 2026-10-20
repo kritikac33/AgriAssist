@@ -31,8 +31,11 @@ def analyze_soil_health(soil_record: SoilRecord, crop_name: str, db: Session) ->
             potassium_max=Decimal("60")
         )
     
+    # Missing measurements remain unknown instead of causing a server error.
     # Analyze pH
-    if soil_record.ph_level < requirements.ph_min:
+    if soil_record.ph_level is None:
+        ph_status, ph_explanation = "unknown", "No pH reading was supplied; use a recent soil test."
+    elif soil_record.ph_level < requirements.ph_min:
         ph_status = "low"
         ph_explanation = f"Soil is acidic. Consider adding lime to raise pH to optimal range ({requirements.ph_min}-{requirements.ph_max})."
     elif soil_record.ph_level > requirements.ph_max:
@@ -43,7 +46,9 @@ def analyze_soil_health(soil_record: SoilRecord, crop_name: str, db: Session) ->
         ph_explanation = f"pH level is within optimal range for {crop_name}."
     
     # Analyze nitrogen
-    if soil_record.nitrogen < requirements.nitrogen_min:
+    if soil_record.nitrogen is None:
+        nitrogen_status, nitrogen_explanation = "unknown", "No nitrogen reading was supplied; use a recent soil test."
+    elif soil_record.nitrogen < requirements.nitrogen_min:
         nitrogen_status = "low"
         nitrogen_explanation = f"Low nitrogen. Apply nitrogen-rich fertilizer (urea, DAP) to promote leaf growth."
     elif soil_record.nitrogen > requirements.nitrogen_max:
@@ -54,7 +59,9 @@ def analyze_soil_health(soil_record: SoilRecord, crop_name: str, db: Session) ->
         nitrogen_explanation = f"Nitrogen level is optimal for {crop_name}."
     
     # Analyze phosphorus
-    if soil_record.phosphorus < requirements.phosphorus_min:
+    if soil_record.phosphorus is None:
+        phosphorus_status, phosphorus_explanation = "unknown", "No phosphorus reading was supplied; use a recent soil test."
+    elif soil_record.phosphorus < requirements.phosphorus_min:
         phosphorus_status = "low"
         phosphorus_explanation = f"Low phosphorus. Apply phosphorus-rich fertilizer (DAP, SSP) to promote root development."
     elif soil_record.phosphorus > requirements.phosphorus_max:
@@ -65,7 +72,9 @@ def analyze_soil_health(soil_record: SoilRecord, crop_name: str, db: Session) ->
         phosphorus_explanation = f"Phosphorus level is optimal for {crop_name}."
     
     # Analyze potassium
-    if soil_record.potassium < requirements.potassium_min:
+    if soil_record.potassium is None:
+        potassium_status, potassium_explanation = "unknown", "No potassium reading was supplied; use a recent soil test."
+    elif soil_record.potassium < requirements.potassium_min:
         potassium_status = "low"
         potassium_explanation = f"Low potassium. Apply potassium-rich fertilizer (MOP, SOP) to improve disease resistance and fruit quality."
     elif soil_record.potassium > requirements.potassium_max:
@@ -83,7 +92,11 @@ def analyze_soil_health(soil_record: SoilRecord, crop_name: str, db: Session) ->
         phosphorus_status=phosphorus_status,
         phosphorus_explanation=phosphorus_explanation,
         potassium_status=potassium_status,
-        potassium_explanation=potassium_explanation
+        potassium_explanation=potassium_explanation,
+        organic_matter_status=("unknown" if soil_record.organic_matter is None else "low" if soil_record.organic_matter < Decimal("2") else "high" if soil_record.organic_matter > Decimal("8") else "optimal"),
+        organic_matter_explanation=("No organic matter reading was supplied." if soil_record.organic_matter is None else "Organic matter is below the broad 2% planning threshold; build it gradually with compost, green manure, and residue retention." if soil_record.organic_matter < Decimal("2") else "Organic matter is unusually high for this broad planning band; avoid adding amendments without a soil test." if soil_record.organic_matter > Decimal("8") else "Organic matter is in the broad 2-8% planning band; maintain cover and residue inputs."),
+        moisture_status=("unknown" if soil_record.moisture is None else "low" if soil_record.moisture < Decimal("20") else "high" if soil_record.moisture > Decimal("70") else "optimal"),
+        moisture_explanation=("No moisture reading was supplied." if soil_record.moisture is None else "Low entered moisture; check root-zone moisture and crop stage before irrigating." if soil_record.moisture < Decimal("20") else "High entered moisture; check drainage and avoid unnecessary irrigation." if soil_record.moisture > Decimal("70") else "Entered moisture is within a broad planning range; crop and soil texture affect the target.")
     )
 
 

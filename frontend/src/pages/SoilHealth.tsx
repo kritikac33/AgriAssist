@@ -11,6 +11,7 @@ export default function SoilHealth() {
   const navigate = useNavigate();
   const [farms, setFarms] = useState<FarmResponse[]>([]);
   const [crops, setCrops] = useState<CropResponse[]>([]);
+  const [soilHistory, setSoilHistory] = useState<import('../types').SoilRecordResponse[]>([]);
   const [selectedFarmId, setSelectedFarmId] = useState<number | null>(null);
   const [cropId, setCropId] = useState<number | null>(null);
   const [phLevel, setPhLevel] = useState(6.5);
@@ -23,6 +24,11 @@ export default function SoilHealth() {
   const [analysis, setAnalysis] = useState<SoilAnalysis | null>(null);
   const [error, setError] = useState('');
   const [loadingData, setLoadingData] = useState(false);
+
+  const refreshSoilHistory = async (farmId: number) => {
+    const response = await soilAPI.getSoilRecords(farmId);
+    setSoilHistory(response.data);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -47,6 +53,7 @@ export default function SoilHealth() {
         phosphorus,
         potassium,
         organic_matter: organicMatter,
+        moisture,
         source: 'manual',
       });
 
@@ -54,6 +61,7 @@ export default function SoilHealth() {
       const cropName = crop ? crop.name.toLowerCase() : 'tomato';
       const result = await soilAPI.analyzeSoil(record.data.id, cropName);
       setAnalysis(result.data);
+      await refreshSoilHistory(selectedFarmId);
     } catch (err: any) {
       setError(formatError(err) || 'Analysis failed');
     } finally {
@@ -69,6 +77,7 @@ export default function SoilHealth() {
         setFarms(userFarms.data);
         if (userFarms.data.length > 0) {
           setSelectedFarmId(userFarms.data[0].id);
+          await refreshSoilHistory(userFarms.data[0].id);
           const farmCrops = await cropAPI.getCrops(userFarms.data[0].id);
           setCrops(farmCrops.data);
           if (farmCrops.data.length > 0) {
@@ -87,7 +96,7 @@ export default function SoilHealth() {
   const handleFarmChange = async (farmId: number) => {
     setSelectedFarmId(farmId);
     try {
-      const farmCrops = await cropAPI.getCrops(farmId);
+      const [farmCrops] = await Promise.all([cropAPI.getCrops(farmId), refreshSoilHistory(farmId)]);
       setCrops(farmCrops.data);
       setCropId(farmCrops.data.length > 0 ? farmCrops.data[0].id : null);
     } catch (err) {
@@ -293,10 +302,27 @@ export default function SoilHealth() {
                   <p className="text-sm text-gray-600">{analysis.potassium_explanation}</p>
                 </div>
               </div>
+              <div className="mt-5 grid grid-cols-2 sm:grid-cols-4 gap-3">
+                {[
+                  { name: 'Organic matter', value: `${organicMatter}%`, status: organicMatter < 2 ? 'low' : 'optimal', note: organicMatter < 2 ? 'Add mature compost or retain crop residue.' : 'Maintain with residue cover and rotations.' },
+                  { name: 'Soil moisture', value: `${moisture}%`, status: moisture < 20 ? 'low' : moisture > 70 ? 'high' : 'optimal', note: moisture < 20 ? 'Irrigate carefully and recheck moisture.' : moisture > 70 ? 'Check drainage; avoid irrigation.' : 'Moisture is in a moderate range.' },
+                ].map((item) => <div key={item.name} className="rounded-lg border border-gray-200 p-3"><div className="text-sm font-medium">{item.name}: {item.value}</div><span className={`inline-block my-1 px-2 py-0.5 rounded-full text-xs ${getStatusColor(item.status)}`}>{item.status}</span><p className="text-xs text-gray-600">{item.note}</p></div>)}
+              </div>
+              <div className="mt-5 rounded-lg bg-primary-50 border border-primary-100 p-4">
+                <h3 className="font-semibold text-gray-900">Recommended next actions for {crops.find((crop) => crop.id === cropId)?.name}</h3>
+                <ul className="mt-2 space-y-1 text-sm text-gray-700 list-disc pl-5">
+                  {[analysis.ph_status !== 'optimal' && analysis.ph_explanation, analysis.nitrogen_status !== 'optimal' && analysis.nitrogen_explanation, analysis.phosphorus_status !== 'optimal' && analysis.phosphorus_explanation, analysis.potassium_status !== 'optimal' && analysis.potassium_explanation, organicMatter < 2 && 'Build organic matter gradually with compost, green manure, or retained residues.', moisture < 20 && 'Check root-zone moisture and irrigate according to crop stage.'].filter(Boolean).length === 0 ? <li>Maintain balanced nutrient inputs and monitor the crop through its growth stage.</li> : [analysis.ph_status !== 'optimal' && analysis.ph_explanation, analysis.nitrogen_status !== 'optimal' && analysis.nitrogen_explanation, analysis.phosphorus_status !== 'optimal' && analysis.phosphorus_explanation, analysis.potassium_status !== 'optimal' && analysis.potassium_explanation, organicMatter < 2 && 'Build organic matter gradually with compost, green manure, or retained residues.', moisture < 20 && 'Check root-zone moisture and irrigate according to crop stage.'].filter(Boolean).map((action, index) => <li key={index}>{action}</li>)}
+                </ul>
+                <p className="text-xs text-gray-600 mt-3">Planning estimates based on entered values and crop nutrient ranges; not a laboratory diagnosis. Confirm fertilizer rates with a soil test or local extension specialist.</p>
+              </div>
             </div>
           )}
         </div>
       )}
+      {selectedFarmId && !loadingData && <section className="mt-7 rounded-lg border bg-white p-5 shadow-sm">
+        <div className="mb-4 flex flex-wrap items-end justify-between gap-3"><div><p className="eyebrow">Recorded measurements</p><h2 className="text-xl font-semibold">Soil test history</h2></div><span className="text-sm text-gray-500">Farm #{selectedFarmId}</span></div>
+        {soilHistory.length ? <div className="table-wrap"><table><thead><tr><th>Date</th><th>pH</th><th>N</th><th>P</th><th>K</th><th>Organic matter</th><th>Moisture</th><th>Source</th></tr></thead><tbody>{soilHistory.map((record) => <tr key={record.id}><td>{new Date(record.test_date).toLocaleDateString()}</td><td>{record.ph_level ?? '—'}</td><td>{record.nitrogen ?? '—'}</td><td>{record.phosphorus ?? '—'}</td><td>{record.potassium ?? '—'}</td><td>{record.organic_matter ? `${record.organic_matter}%` : '—'}</td><td>{record.moisture ? `${record.moisture}%` : '—'}</td><td>{record.source}</td></tr>)}</tbody></table></div> : <p className="empty-panel">No soil tests have been recorded for this farm yet. New analyses will appear here.</p>}
+      </section>}
     </>
   );
 }
